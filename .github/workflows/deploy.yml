@@ -1,0 +1,99 @@
+name: Deploy API Server
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci --production=false
+
+    - name: Run tests (if any)
+      run: npm test || echo "No tests defined"
+
+    - name: Create production build (if needed)
+      run: npm run build 2>/dev/null || echo "No build script defined"
+
+    - name: Deploy to server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT || 50022 }}
+        script: |
+          # Create deployment directory if it doesn't exist
+          sudo mkdir -p /var/www/weekilaw-api
+
+          # Stop current PM2 process if running
+          cd /var/www/weekilaw-api && npx pm2 stop weekilaw-api || true
+          npx pm2 delete weekilaw-api || true
+
+          # Backup current ecosystem config if exists
+          sudo cp /var/www/weekilaw-api/ecosystem.config.js /var/www/weekilaw-api/ecosystem.config.js.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+
+    - name: Sync files to server
+      uses: burnett01/rsync-deployments@6.0.0
+      with:
+        switches: -avz --delete --exclude='.git' --exclude='node_modules' --exclude='.env' --exclude='logs' --exclude='.pm2' --exclude='.github'
+        path: .
+        remote_path: /var/www/weekilaw-api
+        remote_host: ${{ secrets.SSH_HOST }}
+        remote_user: ${{ secrets.SSH_USER }}
+        remote_key: ${{ secrets.SSH_KEY }}
+        remote_port: ${{ secrets.SSH_PORT || 50022 }}
+
+    - name: Run deployment commands on server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT || 50022 }}
+        script: |
+          cd /var/www/weekilaw-api
+
+          # Set proper permissions
+          sudo chown -R $USER:$USER /var/www/weekilaw-api
+          sudo chmod -R 755 /var/www/weekilaw-api/logs 2>/dev/null || true
+          sudo mkdir -p logs
+
+          # Install dependencies
+          npm ci --production
+
+          # Create logs directory
+          mkdir -p logs
+
+          # Stop any existing process
+          npx pm2 stop weekilaw-api || true
+          npx pm2 delete weekilaw-api || true
+
+          # Start the application with PM2
+          npx pm2 start ecosystem.config.js
+
+          # Save PM2 configuration
+          npx pm2 save
+
+          # Setup PM2 startup (if not already done)
+          npx pm2 startup systemd -u $USER --hp $HOME || echo "PM2 startup already configured"
+
+          echo "API Server deployment completed successfully!"
+          echo "Application is running on port 3001"
+          echo ""
+          echo "Check status: npx pm2 status"
+          echo "Check logs: npx pm2 logs weekilaw-api"
+          echo "Monitor: npx pm2 monit"
