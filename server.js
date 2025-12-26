@@ -134,12 +134,9 @@ app.post('/api/lawyers/fetch-lawyers-data', async (req, res) => {
 
                 if (response.status === 200) {
                     lawyer.lawyers = response.data;
-                } else {
-                    lawyer.lawyers = []; // Mark as failed
                 }
             } catch (error) {
                 console.error(`Error fetching data for lawyer ${i}:`, error.message);
-                lawyer.lawyers = []; // Mark as failed
             }
 
             // Add delay between requests (except for the last one)
@@ -150,11 +147,15 @@ app.post('/api/lawyers/fetch-lawyers-data', async (req, res) => {
 
         // Save the complete lawyersDataArray to file
         try {
-            await fs.writeFile('./lawyers.json', JSON.stringify(lawyersDataArray, null, 2));
-            console.log('Lawyers data saved to lawyers.json');
+            if(lawyersDataArray[0].lawyers.length > 0) {
+                await fs.writeFile('./lawyers.json', JSON.stringify(lawyersDataArray, null, 2));
+                console.log('Lawyers data saved to lawyers.json');
+            } else {
+                console.log('No lawyers data found');
+            }
         } catch (fileError) {
             console.error('Error saving lawyers data to file:', fileError.message);
-        }
+        } 
 
         return res.status(200).json({
             success: true,
@@ -239,7 +240,7 @@ app.post('/api/lawyers/search', async (req, res) => {
                     if (proexperience && lawyer.proexperience !== proexperience) {
                         isMatch = false;
                     }
-                    
+
                     if (isMatch) {
                         // Add training context to the lawyer
                         matchingLawyers.push({
