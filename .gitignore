@@ -127,6 +127,7 @@ logs/
 uploads/
 temp/
 cache/
+lawyers.json
 
 # Environment variables
 .env.local
