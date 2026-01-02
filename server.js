@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const fs = require('fs').promises;
+const cron = require('node-cron');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -9,6 +10,9 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Helper function to add delay between requests
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Validation helper
 const validateLawyerRequest = (req, res) => {
@@ -96,9 +100,6 @@ app.post('/api/lawyers/fetch-lawyers-data', async (req, res) => {
             }
         ];
 
-        // Helper function to add delay between requests
-        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
         // Make request to external API with delay between calls
         for (let i = 0; i < lawyersDataArray.length; i++) {
             const lawyer = lawyersDataArray[i];
@@ -170,6 +171,107 @@ app.post('/api/lawyers/fetch-lawyers-data', async (req, res) => {
             message: 'An error occurred while fetching lawyers data',
             error: error.message
         });
+    }
+});
+
+// Function to convert Persian digits to English digits
+function convertPersianToEnglishDigits(str) {
+    if (!str) return str;
+
+    const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+    const englishDigits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+
+    let result = str;
+    for (let i = 0; i < persianDigits.length; i++) {
+        result = result.replace(new RegExp(persianDigits[i], 'g'), englishDigits[i]);
+    }
+
+    return result;
+}
+
+async function fetchLawyerData(licenseNumber, name, family) {
+    try {
+        const response = await axios.get(
+            'https://search.icbar.org/Lawyer/' + licenseNumber + '/' + name + '_' + family,
+            {
+                timeout: 30000,
+                headers: {
+                    'Content-Type': 'text/html'
+                },
+                httpsAgent: new (require('https').Agent)({
+                    rejectUnauthorized: false // Disable SSL verification
+                })
+            }
+        );
+
+        if (response.status === 200) {
+            // Parse HTML to extract mobileNumber
+            const cheerio = require('cheerio');
+            const $ = cheerio.load(response.data);
+            const mobileNumber = $('#mobileNumber').val() || $('#mobileNumber').attr('value') || '';
+
+            return {
+                mobileNumber: mobileNumber
+            };
+        }
+    } catch (error) {
+        console.error('Fetch lawyer data error:', error.message);
+        return null;
+    }
+}
+
+async function fetchLawyersMobileNumber() {
+    try{
+        // Read lawyers data from local file
+        let lawyersAllData = [];
+        try {
+            const data = await fs.readFile('./lawyers.json', 'utf8');
+            lawyersAllData = JSON.parse(data);
+        } catch (fileError) {
+            console.error('Error reading lawyers.json:', fileError.message);
+            return res.status(500).json({
+                success: false,
+                message: 'Unable to read lawyers database',
+                error: fileError.message
+            });
+        }
+
+        for (const lawyersData of lawyersAllData) {
+            if (lawyersData.lawyers && Array.isArray(lawyersData.lawyers)) {
+                for (const lawyer of lawyersData.lawyers) {
+                    if (!lawyer.mobileNumber || lawyer.mobileNumber === '') {
+                        await delay(2000); // 2 second delay
+                        const lawyerData = await fetchLawyerData(lawyer.licenseNumber, lawyer.name, lawyer.family);
+                        if (lawyerData) {
+                            lawyer.mobileNumber = convertPersianToEnglishDigits(lawyerData.mobileNumber);
+                            console.log(lawyerData);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Save the complete lawyersDataArray to file
+        try {
+            await fs.writeFile('./lawyers.json', JSON.stringify(lawyersDataArray, null, 2));
+            console.log('Lawyers mobile number data saved to lawyers.json');
+        } catch (fileError) {
+            console.error('Error saving lawyers mobile number data to file:', fileError.message);
+        }
+
+    } catch (error) {
+        console.error('Fetch lawyer data error:', error.message);
+    }
+}
+
+// Schedule daily execution at midnight (00:00)
+cron.schedule('0 0 * * *', async () => {
+    console.log('🔄 Starting daily lawyer mobile number update...');
+    try {
+        await fetchLawyersMobileNumber();
+        console.log('✅ Daily lawyer mobile number update completed successfully');
+    } catch (error) {
+        console.error('❌ Error during daily lawyer mobile number update:', error.message);
     }
 });
 
