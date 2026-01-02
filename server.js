@@ -174,6 +174,149 @@ app.post('/api/lawyers/fetch-lawyers-data', async (req, res) => {
     }
 });
 
+app.post('/api/lawyers/fetch-lawyers-data-2', async (req, res) => {
+    try {
+        var lawyersDataArray = [
+            {
+                "workstate": "1",
+                "lawyers": [],
+            },
+            {
+                "workstate": "2",
+                "lawyers": [],
+            },
+            {
+                "workstate": "3",
+                "lawyers": [],
+            },
+            {
+                "workstate": "4",
+                "lawyers": [],
+            },
+            {
+                "workstate": "5",
+                "lawyers": [],
+            },
+            {
+                "workstate": "6",
+                "lawyers": [],
+            },
+            {
+                "workstate": "7",
+                "lawyers": [],
+            },
+            {
+                "workstate": "8",
+                "lawyers": [],
+            },
+            {
+                "workstate": "9",
+                "lawyers": [],
+            },
+            {
+                "workstate": "10",
+                "lawyers": [],
+            },
+            {
+                "workstate": "11",
+                "lawyers": [],
+            },
+            {
+                "workstate": "12",
+                "lawyers": [],
+            },
+            {
+                "workstate": "13",
+                "lawyers": [],
+            },
+            {
+                "workstate": "14",
+                "lawyers": [],
+            },
+            {
+                "workstate": "15",
+                "lawyers": [],
+            },
+            {
+                "workstate": "16",
+                "lawyers": [],
+            }
+        ];
+
+        // Make request to external API with delay between calls
+        for (let i = 0; i < lawyersDataArray.length; i++) {
+            const lawyer = lawyersDataArray[i];
+
+            var searchData = {
+                name: '',
+                family: '',
+                licensenumber: '',
+                mobileNumber: '',
+                EName: '',
+                ELName: '',
+                address: '',
+                gender: '',
+                province: '',
+                workstate: lawyer.workstate,
+                proexperience: '',
+            };
+
+            try {
+                const response = await axios.post(
+                    'https://search.icbar.org/App/Handler/Law.ashx?Method=mGetLawyers',
+                    searchData,
+                    {
+                        timeout: 30000,
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        httpsAgent: new (require('https').Agent)({
+                            rejectUnauthorized: false // Disable SSL verification
+                        })
+                    }
+                );
+
+                if (response.status === 200) {
+                    lawyer.lawyers = response.data;
+                }
+            } catch (error) {
+                console.error(`Error fetching data for lawyer ${i}:`, error.message);
+            }
+
+            // Add delay between requests (except for the last one)
+            if (i < lawyersDataArray.length - 1) {
+                await delay(2000); // 2 second delay
+            }
+        }
+
+        // Save the complete lawyersDataArray to file
+        try {
+            if(lawyersDataArray[0].lawyers.length > 0) {
+                await fs.writeFile('./lawyers.json', JSON.stringify(lawyersDataArray, null, 2));
+                console.log('Lawyers data saved to lawyers.json');
+            } else {
+                console.log('No lawyers data found');
+            }
+        } catch (fileError) {
+            console.error('Error saving lawyers data to file:', fileError.message);
+        } 
+
+        return res.status(200).json({
+            success: true,
+            message: 'Lawyer data fetched and saved successfully',
+            status_code: 200,
+            total_records: lawyersDataArray.length
+        });
+    } catch (error) {
+        console.error('Fetch lawyers data error:', error.message);
+        return res.status(500).json({
+            success: false,
+            message: 'An error occurred while fetching lawyers data',
+            error: error.message
+        });
+    }
+});
+
 // Function to convert Persian digits to English digits
 function convertPersianToEnglishDigits(str) {
     if (!str) return str;
@@ -225,6 +368,15 @@ async function fetchLawyersMobileNumber() {
         // Read lawyers data from local file
         let lawyersAllData = [];
         try {
+            // Check if file exists, create it if not
+            try {
+                await fs.access('./lawyers.json');
+            } catch (accessError) {
+                // File doesn't exist, create it with empty array
+                await fs.writeFile('./lawyers.json', '[]');
+                console.log('Created new lawyers.json file');
+            }
+
             const data = await fs.readFile('./lawyers.json', 'utf8');
             lawyersAllData = JSON.parse(data);
         } catch (fileError) {
@@ -263,17 +415,17 @@ async function fetchLawyersMobileNumber() {
         console.error('Fetch lawyer data error:', error.message);
     }
 }
-
+// fetchLawyersMobileNumber();
 // Schedule daily execution at midnight (00:00)
-cron.schedule('0 0 * * *', async () => {
-    console.log('🔄 Starting daily lawyer mobile number update...');
-    try {
-        await fetchLawyersMobileNumber();
-        console.log('✅ Daily lawyer mobile number update completed successfully');
-    } catch (error) {
-        console.error('❌ Error during daily lawyer mobile number update:', error.message);
-    }
-});
+// cron.schedule('0 0 * * *', async () => {
+//     console.log('🔄 Starting daily lawyer mobile number update...');
+//     try {
+//         await fetchLawyersMobileNumber();
+//         console.log('✅ Daily lawyer mobile number update completed successfully');
+//     } catch (error) {
+//         console.error('❌ Error during daily lawyer mobile number update:', error.message);
+//     }
+// });
 
 // Lawyer Search API
 app.post('/api/lawyers/search', async (req, res) => {
