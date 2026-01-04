@@ -574,29 +574,57 @@ app.get('/health', (req, res) => {
 
 // ==================== API V1 ENDPOINTS (LAWYERS.JSON - FILE-BASED) ====================
 
-// V1 - Count lawyers in file-based data (lawyers.json)
+// V1 - Count lawyers in MongoDB (imported from lawyers.json)
 app.get('/api/v1/lawyers/count', async (req, res) => {
     try {
-        const fs = require('fs').promises;
-        const data = await fs.readFile('./lawyers.json', 'utf8');
-        const lawyersData = JSON.parse(data);
+        if (!mongoConnected) {
+            return res.status(503).json({
+                success: false,
+                message: 'MongoDB not available for v1 API',
+                source: 'mongodb_required',
+                version: 'v1'
+            });
+        }
+
+        // Import mongoose and get/create model
+        const mongoose = require('mongoose');
+
+        let LawyerFromFile;
+        try {
+            LawyerFromFile = mongoose.model('LawyerFromFile');
+        } catch (error) {
+            const LawyerFromFileSchema = new mongoose.Schema({
+                name: String,
+                license_number: String,
+                validity_date: String,
+                phone: String,
+                mobile: String,
+                address: String,
+                extraction_method: String,
+                training_title: String,
+                training_proexperience: String,
+                training_record_id: Number
+            }, { timestamps: true });
+            LawyerFromFile = mongoose.model('LawyerFromFile', LawyerFromFileSchema);
+        }
+        const count = await LawyerFromFile.countDocuments();
 
         res.json({
             success: true,
-            count: lawyersData.length,
-            message: `Total training records in lawyers.json: ${lawyersData.length}`,
-            source: 'file_v1',
+            count: count,
+            message: `Total lawyers from lawyers.json in MongoDB: ${count}`,
+            source: 'mongodb_v1',
             version: 'v1',
-            data_type: 'training_records'
+            data_type: 'imported_lawyers'
         });
 
     } catch (error) {
-        console.error('V1 count error:', error);
+        console.error('V1 MongoDB count error:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to count training records',
+            message: 'Failed to count imported lawyers',
             error: error.message,
-            source: 'file_error',
+            source: 'mongodb_error',
             version: 'v1'
         });
     }
@@ -861,8 +889,8 @@ app.get('/', (req, res) => {
         databases: ['MongoDB (lawyers2.json)', 'File-based (lawyers.json)'],
         api_versions: ['v1 (File-based)', 'v2 (MongoDB)'],
         endpoints: {
-            // V1 APIs (File-based - lawyers.json)
-            'GET /api/v1/lawyers/count': 'Get training records count (lawyers.json)',
+            // V1 APIs (MongoDB - imported from lawyers.json)
+            'GET /api/v1/lawyers/count': 'Get lawyers count from lawyers.json (MongoDB)',
             'POST /api/v1/lawyers/search': 'Search training records (lawyers.json)',
             'POST /api/v1/lawyers/fetch-data': 'Get all training records (lawyers.json)',
 
