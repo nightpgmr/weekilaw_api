@@ -443,89 +443,46 @@ app.post('/api/lawyers/search', async (req, res) => {
     try {
         const { name, mobile, license_number, grade, address } = req.body;
 
-        if (mongoConnected) {
-            // MongoDB search
-            let searchQuery = {};
-
-            if (name) {
-                searchQuery.name = { $regex: name, $options: 'i' }; // Case insensitive search
-            }
-
-            if (mobile) {
-                searchQuery.mobile = mobile;
-            }
-
-            if (license_number) {
-                searchQuery.license_number = license_number;
-            }
-
-            if (grade) {
-                searchQuery.grade = { $regex: grade, $options: 'i' };
-            }
-
-            if (address) {
-                searchQuery.address = { $regex: address, $options: 'i' };
-            }
-
-            const lawyers = await Lawyer.find(searchQuery).limit(100);
-
-            return res.json({
-                success: true,
-                data: lawyers,
-                count: lawyers.length,
-                message: `Found ${lawyers.length} matching lawyers`,
-                source: 'mongodb'
-            });
-        } else {
-            // File-based search fallback
-            let lawyersData;
-            try {
-                const data = await fs.readFile('./lawyers2.json', 'utf8');
-                lawyersData = JSON.parse(data);
-            } catch (fileError) {
-                console.error('Error reading lawyers2.json:', fileError.message);
-                return res.status(500).json({
-                    success: false,
-                    message: 'Unable to read lawyers database',
-                    error: fileError.message
-                });
-            }
-
-            // Search through lawyers data
-            let matchingLawyers = lawyersData.filter(lawyer => {
-                let isMatch = true;
-
-                if (name && !lawyer.name.toLowerCase().includes(name.toLowerCase())) {
-                    isMatch = false;
-                }
-
-                if (mobile && lawyer.mobile !== mobile) {
-                    isMatch = false;
-                }
-
-                if (license_number && lawyer.license_number !== license_number) {
-                    isMatch = false;
-                }
-
-                if (grade && !lawyer.grade.toLowerCase().includes(grade.toLowerCase())) {
-                    isMatch = false;
-                }
-
-                if (address && !lawyer.address.toLowerCase().includes(address.toLowerCase())) {
-                    isMatch = false;
-                }
-
-                return isMatch;
-            }).slice(0, 100); // Limit results
-
-            return res.json({
-                success: true,
-                data: matchingLawyers,
-                count: matchingLawyers.length,
-                message: `Found ${matchingLawyers.length} matching lawyers`,
-                source: 'file'
+        // Full MongoDB usage only (no file fallback)
+        if (!mongoConnected) {
+            return res.status(503).json({
+                success: false,
+                message: 'MongoDB not available - full MongoDB mode enabled',
+                source: 'mongodb_required'
             });
         }
+
+        let searchQuery = {};
+
+        if (name) {
+            searchQuery.name = { $regex: name, $options: 'i' }; // Case insensitive search
+        }
+
+        if (mobile) {
+            searchQuery.mobile = mobile;
+        }
+
+        if (license_number) {
+            searchQuery.license_number = license_number;
+        }
+
+        if (grade) {
+            searchQuery.grade = { $regex: grade, $options: 'i' };
+        }
+
+        if (address) {
+            searchQuery.address = { $regex: address, $options: 'i' };
+        }
+
+        const lawyers = await Lawyer.find(searchQuery).limit(100);
+
+        return res.json({
+            success: true,
+            data: lawyers,
+            count: lawyers.length,
+            message: `Found ${lawyers.length} matching lawyers`,
+            source: 'mongodb_full'
+        });
 
     } catch (error) {
         console.error('Lawyer search error:', error.message);
@@ -560,102 +517,45 @@ app.post('/api/lawyers/verify', async (req, res) => {
             });
         }
 
-        if (mongoConnected) {
-            // MongoDB verification
-            let verifyQuery = { name: { $regex: `^${name}$`, $options: 'i' } }; // Exact name match, case insensitive
-
-            if (mobile && license_number) {
-                // Verify with both mobile and license number
-                verifyQuery.$or = [
-                    { mobile: mobile, license_number: license_number }
-                ];
-            } else if (mobile) {
-                // Verify with name and mobile
-                verifyQuery.mobile = mobile;
-            } else if (license_number) {
-                // Verify with name and license number
-                verifyQuery.license_number = license_number;
-            }
-
-            const lawyer = await Lawyer.findOne(verifyQuery);
-
-            const isVerified = !!lawyer;
-
-            return res.json({
-                verified: isVerified,
-                message: isVerified ? 'Lawyer is verified' : 'Lawyer not found',
-                data: isVerified ? {
-                    name: lawyer.name,
-                    license_number: lawyer.license_number,
-                    mobile: lawyer.mobile,
-                    grade: lawyer.grade
-                } : null,
-                source: 'mongodb'
-            });
-        } else {
-            // File-based verification fallback
-            let lawyersData;
-            try {
-                const data = await fs.readFile('./lawyers2.json', 'utf8');
-                lawyersData = JSON.parse(data);
-            } catch (fileError) {
-                console.error('Error reading lawyers2.json:', fileError.message);
-                return res.status(500).json({
-                    verified: false,
-                    message: 'Unable to read lawyers database',
-                    error: fileError.message
-                });
-            }
-
-            // Search for exact match
-            let verifiedLawyer = null;
-
-            for (const lawyer of lawyersData) {
-                let isExactMatch = true;
-
-                // Check name (exact match, case insensitive)
-                if (name && (!lawyer.name || lawyer.name.toLowerCase() !== name.toLowerCase())) {
-                    isExactMatch = false;
-                }
-
-                // Check mobile or license_number
-                if (mobile && license_number) {
-                    // Both provided - check both match
-                    if (lawyer.mobile !== mobile || lawyer.license_number !== license_number) {
-                        isExactMatch = false;
-                    }
-                } else if (mobile) {
-                    // Only mobile provided
-                    if (lawyer.mobile !== mobile) {
-                        isExactMatch = false;
-                    }
-                } else if (license_number) {
-                    // Only license_number provided
-                    if (lawyer.license_number !== license_number) {
-                        isExactMatch = false;
-                    }
-                }
-
-                if (isExactMatch) {
-                    verifiedLawyer = lawyer;
-                    break;
-                }
-            }
-
-            const isVerified = !!verifiedLawyer;
-
-            return res.json({
-                verified: isVerified,
-                message: isVerified ? 'Lawyer is verified' : 'Lawyer not found',
-                data: isVerified ? {
-                    name: verifiedLawyer.name,
-                    license_number: verifiedLawyer.license_number,
-                    mobile: verifiedLawyer.mobile,
-                    grade: verifiedLawyer.grade
-                } : null,
-                source: 'file'
+        // Full MongoDB usage only (no file fallback)
+        if (!mongoConnected) {
+            return res.status(503).json({
+                verified: false,
+                message: 'MongoDB not available - full MongoDB mode enabled',
+                source: 'mongodb_required'
             });
         }
+
+        let verifyQuery = { name: { $regex: `^${name}$`, $options: 'i' } }; // Exact name match, case insensitive
+
+        if (mobile && license_number) {
+            // Verify with both mobile and license number
+            verifyQuery.$or = [
+                { mobile: mobile, license_number: license_number }
+            ];
+        } else if (mobile) {
+            // Verify with name and mobile
+            verifyQuery.mobile = mobile;
+        } else if (license_number) {
+            // Verify with name and license number
+            verifyQuery.license_number = license_number;
+        }
+
+        const lawyer = await Lawyer.findOne(verifyQuery);
+
+        const isVerified = !!lawyer;
+
+        return res.json({
+            verified: isVerified,
+            message: isVerified ? 'Lawyer is verified' : 'Lawyer not found',
+            data: isVerified ? {
+                name: lawyer.name,
+                license_number: lawyer.license_number,
+                mobile: lawyer.mobile,
+                grade: lawyer.grade
+            } : null,
+            source: 'mongodb_full'
+        });
 
     } catch (error) {
         console.error('Lawyer verification error:', error.message);
@@ -672,19 +572,319 @@ app.get('/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// ==================== API V1 ENDPOINTS (LAWYERS.JSON - FILE-BASED) ====================
+
+// V1 - Count lawyers in file-based data (lawyers.json)
+app.get('/api/v1/lawyers/count', async (req, res) => {
+    try {
+        const fs = require('fs').promises;
+        const data = await fs.readFile('./lawyers.json', 'utf8');
+        const lawyersData = JSON.parse(data);
+
+        res.json({
+            success: true,
+            count: lawyersData.length,
+            message: `Total training records in lawyers.json: ${lawyersData.length}`,
+            source: 'file_v1',
+            version: 'v1',
+            data_type: 'training_records'
+        });
+
+    } catch (error) {
+        console.error('V1 count error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to count training records',
+            error: error.message,
+            source: 'file_error',
+            version: 'v1'
+        });
+    }
+});
+
+// V1 - Search training data (lawyers.json)
+app.post('/api/v1/lawyers/search', async (req, res) => {
+    try {
+        const fs = require('fs').promises;
+        const { name, mobile, license_number, address } = req.body;
+
+        const data = await fs.readFile('./lawyers.json', 'utf8');
+        const trainingRecords = JSON.parse(data);
+
+        // Search through training records
+        let matchingRecords = trainingRecords.filter(record => {
+            if (name && !record.title.toLowerCase().includes(name.toLowerCase())) {
+                return false;
+            }
+            // Training records don't have individual lawyer search fields like mobile/license
+            return true;
+        });
+
+        res.json({
+            success: true,
+            data: matchingRecords,
+            count: matchingRecords.length,
+            message: `Found ${matchingRecords.length} training records`,
+            source: 'file_v1',
+            version: 'v1',
+            query: req.body
+        });
+
+    } catch (error) {
+        console.error('V1 search error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Search failed for training data',
+            error: error.message,
+            source: 'file_error',
+            version: 'v1'
+        });
+    }
+});
+
+// V1 - Get training data (lawyers.json)
+app.post('/api/v1/lawyers/fetch-data', async (req, res) => {
+    try {
+        const fs = require('fs').promises;
+        const data = await fs.readFile('./lawyers.json', 'utf8');
+        const trainingRecords = JSON.parse(data);
+
+        res.json({
+            success: true,
+            data: trainingRecords,
+            count: trainingRecords.length,
+            message: `Retrieved ${trainingRecords.length} training records`,
+            source: 'file_v1',
+            version: 'v1'
+        });
+
+    } catch (error) {
+        console.error('V1 fetch error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch training data',
+            error: error.message,
+            source: 'file_error',
+            version: 'v1'
+        });
+    }
+});
+
+// ==================== API V2 ENDPOINTS (LAWYERS2.JSON - MONGODB) ====================
+
+// V2 - Search lawyers (MongoDB)
+app.post('/api/v2/lawyers/search', async (req, res) => {
+    try {
+        if (!mongoConnected) {
+            return res.status(503).json({
+                success: false,
+                message: 'MongoDB not available for v2 API',
+                source: 'mongodb_required',
+                version: 'v2'
+            });
+        }
+
+        const { name, mobile, license_number, grade, address, limit = 100 } = req.body;
+
+        // Build search query
+        let query = {};
+        if (name) query.name = new RegExp(name, 'i');
+        if (mobile) query.mobile = new RegExp(mobile.replace(/\s+/g, ''), 'i');
+        if (license_number) query.license_number = license_number.toString();
+        if (grade) query.grade = new RegExp(grade, 'i');
+        if (address) query.address = new RegExp(address, 'i');
+
+        const lawyers = await Lawyer.find(query)
+            .limit(parseInt(limit))
+            .sort({ name: 1 });
+
+        res.json({
+            success: true,
+            data: lawyers,
+            count: lawyers.length,
+            query: req.body,
+            message: `Found ${lawyers.length} lawyers in v2 database`,
+            source: 'mongodb_v2',
+            version: 'v2'
+        });
+
+    } catch (error) {
+        console.error('V2 search error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Search failed for v2 data',
+            error: error.message,
+            source: 'mongodb_error',
+            version: 'v2'
+        });
+    }
+});
+
+// V2 - Verify lawyer (MongoDB)
+app.post('/api/v2/lawyers/verify', async (req, res) => {
+    try {
+        if (!mongoConnected) {
+            return res.status(503).json({
+                success: false,
+                message: 'MongoDB not available for v2 API',
+                source: 'mongodb_required',
+                version: 'v2'
+            });
+        }
+
+        const { name, mobile, license_number } = req.body;
+
+        if (!name) {
+            return res.status(400).json({
+                success: false,
+                message: 'Name is required',
+                version: 'v2'
+            });
+        }
+
+        if (!mobile && !license_number) {
+            return res.status(400).json({
+                success: false,
+                message: 'Either mobile number or license number is required',
+                version: 'v2'
+            });
+        }
+
+        let query = { name: new RegExp(name, 'i') };
+        if (mobile) query.mobile = new RegExp(mobile.replace(/\s+/g, ''), 'i');
+        if (license_number) query.license_number = license_number.toString();
+
+        const lawyer = await Lawyer.findOne(query);
+
+        res.json({
+            success: true,
+            verified: !!lawyer,
+            data: lawyer,
+            message: lawyer ? 'Lawyer verified successfully in v2 database' : 'Lawyer not found in v2 database',
+            source: 'mongodb_v2',
+            version: 'v2'
+        });
+
+    } catch (error) {
+        console.error('V2 verification error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Verification failed for v2 data',
+            error: error.message,
+            source: 'mongodb_error',
+            version: 'v2'
+        });
+    }
+});
+
+// V2 - Count lawyers (MongoDB)
+app.get('/api/v2/lawyers/count', async (req, res) => {
+    try {
+        if (!mongoConnected) {
+            return res.status(503).json({
+                success: false,
+                message: 'MongoDB not available for v2 API',
+                source: 'mongodb_required',
+                version: 'v2'
+            });
+        }
+
+        const count = await Lawyer.countDocuments();
+
+        res.json({
+            success: true,
+            count: count,
+            message: `Total lawyers in v2 database: ${count}`,
+            source: 'mongodb_v2',
+            version: 'v2'
+        });
+
+    } catch (error) {
+        console.error('V2 count error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get count for v2 data',
+            error: error.message,
+            source: 'mongodb_error',
+            version: 'v2'
+        });
+    }
+});
+
+// V2 - Database statistics (MongoDB)
+app.get('/api/v2/lawyers/stats', async (req, res) => {
+    try {
+        if (!mongoConnected) {
+            return res.status(503).json({
+                success: false,
+                message: 'MongoDB not available for v2 API',
+                source: 'mongodb_required',
+                version: 'v2'
+            });
+        }
+
+        const totalCount = await Lawyer.countDocuments();
+        const gradeStats = await Lawyer.aggregate([
+            { $group: { _id: '$grade', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                total_lawyers: totalCount,
+                grades: gradeStats,
+                database: 'MongoDB (lawyers2.json)',
+                last_updated: new Date().toISOString()
+            },
+            source: 'mongodb_v2',
+            version: 'v2'
+        });
+
+    } catch (error) {
+        console.error('V2 stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get statistics for v2 data',
+            error: error.message,
+            source: 'mongodb_error',
+            version: 'v2'
+        });
+    }
+});
+
+
 // Root endpoint
 app.get('/', (req, res) => {
     res.json({
-        message: 'Weekilaw API Server (MongoDB)',
-        database: 'MongoDB',
+        message: 'Weekilaw API Server (Versioned APIs)',
+        databases: ['MongoDB (lawyers2.json)', 'File-based (lawyers.json)'],
+        api_versions: ['v1 (File-based)', 'v2 (MongoDB)'],
         endpoints: {
-            'POST /api/lawyers/search': 'Search for lawyers (name, mobile, license_number, grade, address)',
-            'POST /api/lawyers/verify': 'Verify lawyer with name and mobile or license number',
+            // V1 APIs (File-based - lawyers.json)
+            'GET /api/v1/lawyers/count': 'Get training records count (lawyers.json)',
+            'POST /api/v1/lawyers/search': 'Search training records (lawyers.json)',
+            'POST /api/v1/lawyers/fetch-data': 'Get all training records (lawyers.json)',
+
+            // V2 APIs (MongoDB - lawyers2.json)
+            'POST /api/v2/lawyers/search': 'Search lawyers (lawyers2.json MongoDB)',
+            'POST /api/v2/lawyers/verify': 'Verify lawyer (lawyers2.json MongoDB)',
+            'GET /api/v2/lawyers/count': 'Get lawyers count (lawyers2.json)',
+            'GET /api/v2/lawyers/stats': 'Get database statistics (lawyers2.json)',
+
+            // Legacy APIs (for backward compatibility)
+            'POST /api/lawyers/fetch-lawyers-data': 'Training data (file-based)',
+            'POST /api/lawyers/fetch-lawyers-data-2': 'Work state data (file-based)',
+
+            // System
             'GET /health': 'Health check'
         },
         scripts: {
-            'npm run import-lawyers': 'Import lawyers2.json data to MongoDB'
-        }
+            'npm run import-lawyers': 'Import lawyers2.json to MongoDB',
+            'npm run import-lawyers-file': 'Import lawyers.json to MongoDB'
+        },
+        mongodb_status: mongoConnected ? 'Connected' : 'Disconnected',
+        note: 'Full MongoDB mode - all search/verify operations require MongoDB connection'
     });
 });
 
@@ -708,13 +908,25 @@ app.use('*', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`🚀 Weekilaw API Server (MongoDB) running on port ${PORT}`);
+    console.log(`🚀 Weekilaw API Server (Versioned APIs) running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log(`🔍 API endpoints:`);
-    console.log(`   POST http://localhost:${PORT}/api/lawyers/search`);
-    console.log(`   POST http://localhost:${PORT}/api/lawyers/verify`);
-    console.log(`📦 Database: MongoDB`);
-    console.log(`🔧 Import data: npm run import-lawyers`);
+    console.log(`   V1 APIs (File-based - lawyers.json):`);
+    console.log(`     GET  http://localhost:${PORT}/api/v1/lawyers/count`);
+    console.log(`     POST http://localhost:${PORT}/api/v1/lawyers/search`);
+    console.log(`     POST http://localhost:${PORT}/api/v1/lawyers/fetch-data`);
+    console.log(`   V2 APIs (MongoDB - lawyers2.json):`);
+    console.log(`     POST http://localhost:${PORT}/api/v2/lawyers/search`);
+    console.log(`     POST http://localhost:${PORT}/api/v2/lawyers/verify`);
+    console.log(`     GET  http://localhost:${PORT}/api/v2/lawyers/count`);
+    console.log(`     GET  http://localhost:${PORT}/api/v2/lawyers/stats`);
+    console.log(`   Legacy APIs:`);
+    console.log(`     POST http://localhost:${PORT}/api/lawyers/fetch-lawyers-data`);
+    console.log(`     POST http://localhost:${PORT}/api/lawyers/fetch-lawyers-data-2`);
+    console.log(`📦 Databases: MongoDB (${mongoConnected ? 'Connected' : 'Disconnected'}) + File-based`);
+    console.log(`🔧 Import scripts:`);
+    console.log(`   npm run import-lawyers (lawyers2.json)`);
+    console.log(`   npm run import-lawyers-file (lawyers.json)`);
 });
 
 module.exports = app;
