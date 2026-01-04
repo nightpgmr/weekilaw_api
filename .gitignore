@@ -128,6 +128,7 @@ uploads/
 temp/
 cache/
 lawyers.json
+lawyers2.json
 
 # Environment variables
 .env.local

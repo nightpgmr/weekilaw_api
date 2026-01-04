@@ -3,6 +3,8 @@ const cors = require('cors');
 const axios = require('axios');
 const fs = require('fs').promises;
 const cron = require('node-cron');
+const connectDB = require('./config/database');
+const Lawyer = require('./models/Lawyer');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -10,6 +12,15 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Connect to MongoDB (with fallback to file-based mode)
+let mongoConnected = false;
+connectDB().then(() => {
+    mongoConnected = true;
+}).catch((err) => {
+    console.warn('⚠️  MongoDB not available, falling back to file-based operations');
+    console.warn('💡 To use MongoDB: Install and start MongoDB, then run: npm run import-lawyers');
+});
 
 // Helper function to add delay between requests
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -427,92 +438,94 @@ async function fetchLawyersMobileNumber() {
 //     }
 // });
 
-// Lawyer Search API
+// Lawyer Search API (MongoDB with file fallback)
 app.post('/api/lawyers/search', async (req, res) => {
     try {
-        // Validate request
-        const validationError = validateLawyerRequest(req, res);
-        if (validationError) return;
+        const { name, mobile, license_number, grade, address } = req.body;
 
-        const { name, family, mobileNumber, licenseNumber, EName, ELName, address, gender, province, workstate, proexperience } = req.body;
+        if (mongoConnected) {
+            // MongoDB search
+            let searchQuery = {};
 
-        // Read lawyers data from local file
-        let lawyersData;
-        try {
-            const data = await fs.readFile('./lawyers.json', 'utf8');
-            lawyersData = JSON.parse(data);
-        } catch (fileError) {
-            console.error('Error reading lawyers.json:', fileError.message);
-            return res.status(500).json({
-                success: false,
-                message: 'Unable to read lawyers database',
-                error: fileError.message
+            if (name) {
+                searchQuery.name = { $regex: name, $options: 'i' }; // Case insensitive search
+            }
+
+            if (mobile) {
+                searchQuery.mobile = mobile;
+            }
+
+            if (license_number) {
+                searchQuery.license_number = license_number;
+            }
+
+            if (grade) {
+                searchQuery.grade = { $regex: grade, $options: 'i' };
+            }
+
+            if (address) {
+                searchQuery.address = { $regex: address, $options: 'i' };
+            }
+
+            const lawyers = await Lawyer.find(searchQuery).limit(100);
+
+            return res.json({
+                success: true,
+                data: lawyers,
+                count: lawyers.length,
+                message: `Found ${lawyers.length} matching lawyers`,
+                source: 'mongodb'
+            });
+        } else {
+            // File-based search fallback
+            let lawyersData;
+            try {
+                const data = await fs.readFile('./lawyers2.json', 'utf8');
+                lawyersData = JSON.parse(data);
+            } catch (fileError) {
+                console.error('Error reading lawyers2.json:', fileError.message);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Unable to read lawyers database',
+                    error: fileError.message
+                });
+            }
+
+            // Search through lawyers data
+            let matchingLawyers = lawyersData.filter(lawyer => {
+                let isMatch = true;
+
+                if (name && !lawyer.name.toLowerCase().includes(name.toLowerCase())) {
+                    isMatch = false;
+                }
+
+                if (mobile && lawyer.mobile !== mobile) {
+                    isMatch = false;
+                }
+
+                if (license_number && lawyer.license_number !== license_number) {
+                    isMatch = false;
+                }
+
+                if (grade && !lawyer.grade.toLowerCase().includes(grade.toLowerCase())) {
+                    isMatch = false;
+                }
+
+                if (address && !lawyer.address.toLowerCase().includes(address.toLowerCase())) {
+                    isMatch = false;
+                }
+
+                return isMatch;
+            }).slice(0, 100); // Limit results
+
+            return res.json({
+                success: true,
+                data: matchingLawyers,
+                count: matchingLawyers.length,
+                message: `Found ${matchingLawyers.length} matching lawyers`,
+                source: 'file'
             });
         }
-
-        // Search through lawyers data
-        let matchingLawyers = [];
-
-        for (const training of lawyersData) {
-            if (training.lawyers && Array.isArray(training.lawyers)) {
-                for (const lawyer of training.lawyers) {
-                    let isMatch = true;
-
-                    // Check name and family (required fields)
-                    if (name && (!lawyer.name || lawyer.name.toLowerCase() !== name.toLowerCase())) {
-                        isMatch = false;
-                    }
-                    if (family && (!lawyer.family || lawyer.family.toLowerCase() !== family.toLowerCase())) {
-                        isMatch = false;
-                    }
-
-                    // Check optional fields
-                    if (licenseNumber && lawyer.licenseNumber !== licenseNumber) {
-                        isMatch = false;
-                    }
-                    if (mobileNumber && (!lawyer.mobileNumber || lawyer.mobileNumber !== mobileNumber)) {
-                        isMatch = false;
-                    }
-                    if (EName && lawyer.englishName !== EName) {
-                        isMatch = false;
-                    }
-                    if (ELName && lawyer.englishFamily !== ELName) {
-                        isMatch = false;
-                    }
-                    if (address && lawyer.officeAddress !== address) {
-                        isMatch = false;
-                    }
-                    if (gender && lawyer.sex !== gender) {
-                        isMatch = false;
-                    }
-                    if (province && lawyer.LDBLawyer_To_BITGeoLocation_officeLocationId.locationName !== province) {
-                        isMatch = false;
-                    }
-                    if (workstate && lawyer.workState !== workstate) {
-                        isMatch = false;
-                    }
-                    if (proexperience && lawyer.proexperience !== proexperience) {
-                        isMatch = false;
-                    }
-
-                    if (isMatch) {
-                        // Add training context to the lawyer
-                        matchingLawyers.push({
-                            ...lawyer,
-                            trainingTitle: training.title,
-                            proexperience: training.proexperience
-                        });
-                    }
-                }
-            }
-        }
-
-        return res.json({
-            success: true,
-            data: matchingLawyers,
-            count: matchingLawyers.length,
-            message: `Found ${matchingLawyers.length} matching lawyers`
-        });
 
     } catch (error) {
         console.error('Lawyer search error:', error.message);
@@ -524,87 +537,125 @@ app.post('/api/lawyers/search', async (req, res) => {
     }
 });
 
-// Lawyer Verification API
+// Lawyer Verification API (MongoDB with file fallback)
 app.post('/api/lawyers/verify', async (req, res) => {
     try {
-        // Validate request
-        const validationError = validateLawyerRequest(req, res);
-        if (validationError) return;
+        const { name, mobile, license_number } = req.body;
 
-        const { name, family, mobileNumber, licenseNumber, EName, ELName, address, gender, province, workstate, proexperience } = req.body;
-
-        // Read lawyers data from local file
-        let lawyersData;
-        try {
-            const data = await fs.readFile('./lawyers.json', 'utf8');
-            lawyersData = JSON.parse(data);
-        } catch (fileError) {
-            console.error('Error reading lawyers.json:', fileError.message);
-            return res.status(500).json({
+        // Validation: require name and either mobile or license_number
+        if (!name) {
+            return res.status(422).json({
                 verified: false,
-                message: 'Unable to read lawyers database',
-                error: fileError.message
+                message: 'Validation failed',
+                errors: {
+                    name: ['The name field is required.']
+                }
             });
         }
 
-        // Search for exact match
-        let isVerified = false;
-
-        for (const training of lawyersData) {
-            if (training.lawyers && Array.isArray(training.lawyers)) {
-                for (const lawyer of training.lawyers) {
-                    let isExactMatch = true;
-
-                    // Check name and family (required fields - case insensitive)
-                    if (name && (!lawyer.name || lawyer.name.toLowerCase() !== name.toLowerCase())) {
-                        isExactMatch = false;
-                    }
-                    if (family && (!lawyer.family || lawyer.family.toLowerCase() !== family.toLowerCase())) {
-                        isExactMatch = false;
-                    }
-
-                    // Check optional fields for exact match
-                    if (licenseNumber && lawyer.licenseNumber !== licenseNumber) {
-                        isExactMatch = false;
-                    }
-                    if (mobileNumber && lawyer.mobileNumber !== mobileNumber) {
-                        isExactMatch = false;
-                    }
-                    if (EName && lawyer.englishName !== EName) {
-                        isExactMatch = false;
-                    }
-                    if (ELName && lawyer.englishFamily !== ELName) {
-                        isExactMatch = false;
-                    }
-                    if (address && lawyer.officeAddress !== address) {
-                        isExactMatch = false;
-                    }
-                    if (gender && lawyer.sex !== gender) {
-                        isExactMatch = false;
-                    }
-                    if (province && lawyer.LDBLawyer_To_BITGeoLocation_officeLocationId.locationName !== province) {
-                        isExactMatch = false;
-                    }
-                    if (workstate && lawyer.workState !== workstate) {
-                        isExactMatch = false;
-                    }
-                    if (proexperience && lawyer.proexperience !== proexperience) {
-                        isExactMatch = false;
-                    }
-
-                    if (isExactMatch) {
-                        isVerified = true;
-                        break;
-                    }
-                }
-                if (isVerified) break;
-            }
+        if (!mobile && !license_number) {
+            return res.status(422).json({
+                verified: false,
+                message: 'Either mobile number or license number is required'
+            });
         }
 
-        return res.json({
-            verified: isVerified,
-            message: isVerified ? 'Lawyer is verified' : 'Lawyer not found',
-        });
+        if (mongoConnected) {
+            // MongoDB verification
+            let verifyQuery = { name: { $regex: `^${name}$`, $options: 'i' } }; // Exact name match, case insensitive
+
+            if (mobile && license_number) {
+                // Verify with both mobile and license number
+                verifyQuery.$or = [
+                    { mobile: mobile, license_number: license_number }
+                ];
+            } else if (mobile) {
+                // Verify with name and mobile
+                verifyQuery.mobile = mobile;
+            } else if (license_number) {
+                // Verify with name and license number
+                verifyQuery.license_number = license_number;
+            }
+
+            const lawyer = await Lawyer.findOne(verifyQuery);
+
+            const isVerified = !!lawyer;
+
+            return res.json({
+                verified: isVerified,
+                message: isVerified ? 'Lawyer is verified' : 'Lawyer not found',
+                data: isVerified ? {
+                    name: lawyer.name,
+                    license_number: lawyer.license_number,
+                    mobile: lawyer.mobile,
+                    grade: lawyer.grade
+                } : null,
+                source: 'mongodb'
+            });
+        } else {
+            // File-based verification fallback
+            let lawyersData;
+            try {
+                const data = await fs.readFile('./lawyers2.json', 'utf8');
+                lawyersData = JSON.parse(data);
+            } catch (fileError) {
+                console.error('Error reading lawyers2.json:', fileError.message);
+                return res.status(500).json({
+                    verified: false,
+                    message: 'Unable to read lawyers database',
+                    error: fileError.message
+                });
+            }
+
+            // Search for exact match
+            let verifiedLawyer = null;
+
+            for (const lawyer of lawyersData) {
+                let isExactMatch = true;
+
+                // Check name (exact match, case insensitive)
+                if (name && (!lawyer.name || lawyer.name.toLowerCase() !== name.toLowerCase())) {
+                    isExactMatch = false;
+                }
+
+                // Check mobile or license_number
+                if (mobile && license_number) {
+                    // Both provided - check both match
+                    if (lawyer.mobile !== mobile || lawyer.license_number !== license_number) {
+                        isExactMatch = false;
+                    }
+                } else if (mobile) {
+                    // Only mobile provided
+                    if (lawyer.mobile !== mobile) {
+                        isExactMatch = false;
+                    }
+                } else if (license_number) {
+                    // Only license_number provided
+                    if (lawyer.license_number !== license_number) {
+                        isExactMatch = false;
+                    }
+                }
+
+                if (isExactMatch) {
+                    verifiedLawyer = lawyer;
+                    break;
+                }
+            }
+
+            const isVerified = !!verifiedLawyer;
+
+            return res.json({
+                verified: isVerified,
+                message: isVerified ? 'Lawyer is verified' : 'Lawyer not found',
+                data: isVerified ? {
+                    name: verifiedLawyer.name,
+                    license_number: verifiedLawyer.license_number,
+                    mobile: verifiedLawyer.mobile,
+                    grade: verifiedLawyer.grade
+                } : null,
+                source: 'file'
+            });
+        }
 
     } catch (error) {
         console.error('Lawyer verification error:', error.message);
@@ -624,11 +675,15 @@ app.get('/health', (req, res) => {
 // Root endpoint
 app.get('/', (req, res) => {
     res.json({
-        message: 'Weekilaw API Server',
+        message: 'Weekilaw API Server (MongoDB)',
+        database: 'MongoDB',
         endpoints: {
-            'POST /api/lawyers/search': 'Search for lawyers',
-            'POST /api/lawyers/verify': 'Verify lawyer existence',
+            'POST /api/lawyers/search': 'Search for lawyers (name, mobile, license_number, grade, address)',
+            'POST /api/lawyers/verify': 'Verify lawyer with name and mobile or license number',
             'GET /health': 'Health check'
+        },
+        scripts: {
+            'npm run import-lawyers': 'Import lawyers2.json data to MongoDB'
         }
     });
 });
@@ -653,11 +708,13 @@ app.use('*', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`🚀 Weekilaw API Server running on port ${PORT}`);
+    console.log(`🚀 Weekilaw API Server (MongoDB) running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log(`🔍 API endpoints:`);
     console.log(`   POST http://localhost:${PORT}/api/lawyers/search`);
     console.log(`   POST http://localhost:${PORT}/api/lawyers/verify`);
+    console.log(`📦 Database: MongoDB`);
+    console.log(`🔧 Import data: npm run import-lawyers`);
 });
 
 module.exports = app;

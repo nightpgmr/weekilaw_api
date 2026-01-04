@@ -1,9 +1,9 @@
 # Weekilaw API Server
 
-Express.js API server for lawyer search and verification using local database. This service provides fast and reliable access to Iranian lawyer information without external dependencies.
+Express.js API server for lawyer search and verification using MongoDB database. This service provides fast and reliable access to Iranian lawyer information with MongoDB integration.
 
 ## 🌐 Production Domain
-- **URL:** `https://sv.weekila.com`
+- **URL:** `https://sv.weekilaw.com`
 - **SSL:** Let's Encrypt (Auto-renewal enabled)
 - **Valid until:** March 26, 2026
 
@@ -12,6 +12,13 @@ Express.js API server for lawyer search and verification using local database. T
 ```bash
 # Install dependencies
 npm install
+
+# Setup MongoDB (make sure MongoDB is running)
+# Default connection: mongodb://localhost:27017/weekilaw
+# You can set MONGODB_URI environment variable for custom connection
+
+# Import lawyer data from lawyers2.json
+npm run import-lawyers
 
 # Start development server
 npm run dev
@@ -22,23 +29,109 @@ npm start
 
 The server will run on `http://localhost:3001`
 
+## 🗄️ Database Setup
+
+### Prerequisites
+1. **MongoDB Installation:** Install MongoDB on your system
+   ```bash
+   # Ubuntu/Debian
+   sudo apt update && sudo apt install mongodb
+
+   # macOS (with Homebrew)
+   brew install mongodb-community
+
+   # Windows - Download from mongodb.com
+   ```
+
+2. **Start MongoDB:**
+   ```bash
+   sudo systemctl start mongodb  # Linux
+   brew services start mongodb-community  # macOS
+   ```
+
+### MongoDB Configuration
+- **Default Connection:** `mongodb://localhost:27017/weekilaw`
+- **Environment Variable:** Set `MONGODB_URI` for custom MongoDB connection
+- **Data Source:** `lawyers2.json` (585,000+ records)
+
+### Data Import
+```bash
+npm run import-lawyers
+```
+This command will:
+1. Connect to MongoDB
+2. Clear existing lawyer data
+3. Import all records from `lawyers2.json`
+4. Create optimized indexes for search performance
+
+### Alternative: File-based Mode
+If MongoDB is not available, the APIs will fallback to file-based operations using `lawyers2.json` directly.
+
 ## 📋 API Endpoints
 
 ### POST `/api/lawyers/search`
-Search for lawyers in the local database with flexible matching criteria.
-
-**Required Fields:** `name`, `family`, and either `mobileNumber` or `licenseNumber`
+Search for lawyers in MongoDB with flexible matching criteria. All fields are optional and support partial matching.
 
 **Request Body:**
 ```json
 {
-  "name": "جلال",
-  "family": "آبتین",
-  "licenseNumber": "22994",
-  "mobileNumber": "09123456789",
-  "gender": "1",
-  "province": "تهران",
-  "workstate": "8"
+  "name": "ابوطالب",
+  "mobile": "09178107789",
+  "license_number": "27085",
+  "grade": "وکیل پایه یک",
+  "address": "زاهدان"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "...",
+      "name": "ابوطالب ایاز",
+      "grade": "وکیل پایه یک",
+      "license_number": "27085",
+      "validity_date": "1405/09/30",
+      "issue_date": "1394/09/29",
+      "phone": "09178107789",
+      "mobile": "09178107789",
+      "address": "زاهدان - نبش بهشتی ۲ - طبقه سوم - دفتر وکالت",
+      "extraction_method": "cheerio",
+      "createdAt": "2024-01-04T...",
+      "updatedAt": "2024-01-04T..."
+    }
+  ],
+  "count": 1,
+  "message": "Found 1 matching lawyers"
+}
+```
+
+### POST `/api/lawyers/verify`
+Verify lawyer existence using name and either mobile number or license number.
+
+**Required Fields:** `name` and either `mobile` or `license_number`
+
+**Request Body:**
+```json
+{
+  "name": "ابوطالب ایاز",
+  "mobile": "09178107789"
+}
+```
+
+**Response:**
+```json
+{
+  "verified": true,
+  "message": "Lawyer is verified",
+  "data": {
+    "name": "ابوطالب ایاز",
+    "license_number": "27085",
+    "mobile": "09178107789",
+    "grade": "وکیل پایه یک"
+  }
 }
 ```
 
@@ -185,12 +278,12 @@ curl http://localhost:3001/health
 ### Production Testing
 ```bash
 # Test with HTTPS domain
-curl -X POST https://sv.weekila.com/api/lawyers/search \
+curl -X POST https://sv.weekilaw.com/api/lawyers/search \
   -H "Content-Type: application/json" \
   -d '{"name":"جلال","family":"آبتین","licenseNumber":"22994"}'
 
 # Health check
-curl https://sv.weekila.com/health
+curl https://sv.weekilaw.com/health
 ```
 
 ## 🚀 Deployment
@@ -202,7 +295,7 @@ NODE_ENV=production          # Environment mode
 ```
 
 ### Domain & SSL
-- **Domain:** sv.weekila.com
+- **Domain:** sv.weekilaw.com
 - **SSL Provider:** Let's Encrypt
 - **Auto-renewal:** Enabled
 - **Valid until:** March 26, 2026
@@ -335,7 +428,7 @@ CMD ["npm", "start"]
 ## 📊 Monitoring
 
 ### Production Server
-- **Domain:** https://sv.weekila.com
+- **Domain:** https://sv.weekilaw.com
 - **Process Manager:** PM2
 - **Logs Location:** `/home/user/.pm2/logs/`
 - **SSL Certificate:** Let's Encrypt (auto-renewal)
@@ -355,7 +448,7 @@ npx pm2 restart weekilaw-api     # Restart service
 curl http://localhost:3001/health
 
 # Production
-curl https://sv.weekila.com/health
+curl https://sv.weekilaw.com/health
 ```
 
 ### SSL Certificate Management
@@ -367,7 +460,7 @@ certbot certificates
 certbot renew
 
 # Manual certificate renewal
-certbot certonly --nginx -d sv.weekila.com
+certbot certonly --nginx -d sv.weekilaw.com
 ```
 
 ## 🔧 Troubleshooting
