@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: weekilaw_mongodb
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: weekilaw_admin
+      MONGO_INITDB_ROOT_PASSWORD: WeekilawSecurePass2024!
+      MONGO_INITDB_DATABASE: weekilaw
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - weekilaw_network
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: weekilaw_mongo_express
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: weekilaw_admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: WeekilawSecurePass2024!
+      ME_CONFIG_MONGODB_URL: mongodb://weekilaw_admin:WeekilawSecurePass2024!@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: weekilaw2024
+    depends_on:
+      - mongodb
+    networks:
+      - weekilaw_network
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+
+networks:
+  weekilaw_network:
+    driver: bridge
